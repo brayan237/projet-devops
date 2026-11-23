@@ -1,8 +1,98 @@
 <!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="UTF-8"><title>Projet DevOps</title></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#050508">
+  <meta name="description" content="Storm & Smoke : galerie photo interactive avec fumée volumétrique et éclairs procéduraux.">
+  <title>Storm &amp; Smoke — Galerie photo</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23050508'/%3E%3Cpath d='M13 2 5 14h5.5l-1 8 8.500-12H12z' fill='%2300f3ff'/%3E%3C/svg%3E">
+  <link rel="preload" as="image" href="images/itachi.jpg">
+  <link rel="stylesheet" href="style.css">
+</head>
 <body>
-  <h1>Application déployée automatiquement via Jenkins & Docker</h1>
-  <p>Accessible sur 192.168.56.10</p>
+  <!-- Ambiance : reflet flou de la photo active + halo coloré -->
+  <div class="ambient" aria-hidden="true">
+    <div class="amb"></div>
+    <div class="amb"></div>
+  </div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <!-- Barre de contrôles discrète -->
+  <header class="topbar">
+    <div class="brand" aria-label="Storm and Smoke">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
+      STORM<span class="amp">&amp;</span>SMOKE
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Intensité de la fumée">
+        <button type="button" data-smoke="normal" aria-pressed="true">Normale</button>
+        <button type="button" data-smoke="dense" aria-pressed="false">Dense</button>
+      </div>
+      <button type="button" class="chip" id="btn-storm" aria-pressed="false" title="Éclairs automatiques">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 18a4 4 0 010-8 5 5 0 019.600-1A4 4 0 0117 18H7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        <span class="lbl">Tempête</span>
+      </button>
+      <button type="button" class="chip" id="btn-bolt" title="Déclencher un éclair (Espace)">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
+        <span class="lbl">Éclair</span>
+      </button>
+      <button type="button" class="chip" id="btn-sound" aria-pressed="false" title="Ambiance sonore (tonnerre)">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 9a4 4 0 010 6M18.500 6.500a8 8 0 010 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="lbl">Son</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="app">
+    <section class="card-wrap" id="card-wrap" aria-roledescription="carrousel" aria-label="Galerie photo">
+      <article class="card" id="card">
+        <div class="photo" id="photo">
+          <img class="layer" id="layer-a" alt="" draggable="false" decoding="async">
+          <img class="layer" id="layer-b" alt="" draggable="false" decoding="async">
+          <div class="glare" aria-hidden="true"></div>
+          <div class="shock" id="shock" aria-hidden="true"></div>
+          <div class="flash" id="flash" aria-hidden="true"></div>
+        </div>
+        <div class="info" id="info" aria-live="polite">
+          <div class="txt">
+            <h1 id="title">Storm &amp; Smoke</h1>
+            <p id="caption">Chargement…</p>
+          </div>
+          <div class="counter" aria-label="Numéro de la photo"><b id="cur">01</b><i>/</i><span id="tot">00</span></div>
+        </div>
+      </article>
+    </section>
+
+    <div class="progress" aria-hidden="true"><i id="progress"></i></div>
+
+    <nav class="nav" aria-label="Navigation de la galerie">
+      <button type="button" class="navbtn" id="btn-prev" aria-label="Photo précédente">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="lbl">Précédent</span>
+      </button>
+      <div class="dots" id="dots" role="group" aria-label="Choisir une photo"></div>
+      <button type="button" class="navbtn" id="btn-next" aria-label="Photo suivante">
+        <span class="lbl">Suivant</span>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </nav>
+  </main>
+
+  <p class="hint" aria-hidden="true">← → naviguer · Espace éclair · clic sur la photo = foudre ciblée</p>
+
+  <!-- Canvas superposés -->
+  <canvas id="smoke-canvas" aria-hidden="true"></canvas>
+  <canvas id="lightning-canvas" aria-hidden="true"></canvas>
+
+  <div class="loader" id="loader" role="status">
+    <div class="loader-box">
+      <span>Le ciel se charge</span>
+      <i></i>
+    </div>
+  </div>
+
+  <noscript><p class="noscript">Cette galerie nécessite JavaScript.</p></noscript>
+  <script src="script.js"></script>
 </body>
 </html>
