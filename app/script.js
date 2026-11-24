@@ -168,7 +168,49 @@
 
   const sprites = [makeSprite(), makeSprite(), makeSprite(), makeSprite()];
 
-  const smoke = { parts: [], dense: false, boost: 0, flash: 0 };
+  const smoke = { parts: [], puffs: [], dense: false, boost: 0, flash: 0 };
+
+  // Émetteurs de fumée : les graffitis (rectangles mis à jour régulièrement)
+  const emitters = [];
+  let tagsOn = false;
+
+  function addPuff(r, big) {
+    if (smoke.puffs.length > 150) return;
+    const sc = clamp(Math.max(W, H) / 1500, 0.6, 1.3);
+    const s0 = (big ? rand(50, 90) : rand(28, 55)) * sc;
+    smoke.puffs.push({
+      bx: r.left + r.width * rand(0.05, 0.95),
+      y: r.top + r.height * rand(0.2, 0.85),
+      s0,
+      s1: s0 * rand(3, 5),
+      speed: big ? rand(60, 120) : rand(28, 70),
+      drift: rand(-9, 9),
+      life: big ? rand(3.6, 5.6) : rand(2.8, 4.6),
+      amp: rand(8, 26),
+      freq: rand(0.4, 1),
+      ph: rand(0, Math.PI * 2),
+      rot: rand(0, Math.PI * 2),
+      vr: rand(-0.3, 0.3),
+      maxA: big ? rand(0.2, 0.32) : rand(0.12, 0.22),
+      spr: sprites[randInt(0, sprites.length - 1)],
+      age: 0
+    });
+  }
+
+  function emitPuffs(dt) {
+    if (!tagsOn) return;
+    for (const e of emitters) {
+      const r = e.r;
+      if (!r || r.width < 10) continue;
+      e.acc += dt * (smoke.dense ? 24 : 14) * (1 + smoke.boost);
+      while (e.acc >= 1) { e.acc -= 1; addPuff(r, false); }
+      e.burst -= dt;
+      if (e.burst <= 0) { // « ouff » : bouffée plus dense
+        e.burst = rand(2.2, 3.6);
+        for (let i = 0; i < 5; i++) addPuff(r, true);
+      }
+    }
+  }
 
   function targetCount() {
     let n = clamp(Math.round((W * H) / (1920 * 1080) * 54 + 20), 28, 76);
@@ -259,6 +301,29 @@
       sctx.drawImage(p.spr, -SPR / 2, -SPR / 2);
     }
 
+    // Fumée qui s'échappe des graffitis
+    emitPuffs(dt);
+    const puffs = smoke.puffs;
+    for (let i = puffs.length - 1; i >= 0; i--) {
+      const p = puffs[i];
+      p.age += dt;
+      if (p.age >= p.life) { puffs.splice(i, 1); continue; }
+      const u = p.age / p.life;
+      p.y -= p.speed * (1 + smoke.boost * 1.5) * (1 - u * 0.4) * dt;
+      p.bx += p.drift * dt;
+      p.rot += p.vr * dt;
+      const x = p.bx + Math.sin(t * p.freq + p.ph) * p.amp * (0.3 + u);
+      const size = lerp(p.s0, p.s1, Math.sqrt(u));
+      const a = Math.min(p.maxA * Math.pow(Math.sin(Math.PI * u), 0.8) * (1 + smoke.flash * 1.6), 0.6);
+      if (a < 0.004) continue;
+      const c = Math.cos(p.rot);
+      const s = Math.sin(p.rot);
+      const k = (size / SPR) * SC;
+      sctx.globalAlpha = a;
+      sctx.setTransform(c * k, s * k, -s * k, c * k, x * SC, p.y * SC);
+      sctx.drawImage(p.spr, -SPR / 2, -SPR / 2);
+    }
+
     // Teinte : dégradé vertical entre les deux couleurs du thème actif
     sctx.setTransform(SC, 0, 0, SC, 0, 0);
     sctx.globalAlpha = 1;
@@ -317,6 +382,19 @@
   }
 
   function strike(opts) {
+    if (opts.bolts) { // éclairs sur mesure (ex. traversée d'un graffiti)
+      opts.bolts.forEach(d => {
+        const b = {
+          sx: d.sx, sy: d.sy, ex: d.ex, ey: d.ey,
+          born: performance.now() + (d.delay || 0),
+          dur: rand(450, 700), seed: rand(0, 100), re1: false, re2: false
+        };
+        buildBolt(b);
+        bolts.push(b);
+      });
+      if (bolts.length > 8) bolts.splice(0, bolts.length - 8);
+      return;
+    }
     const r = cardWrap.getBoundingClientRect();
     const count = opts.target ? 1 : (Math.random() < 0.35 ? 2 : 1);
     const sides = Math.random() < 0.5 ? ['L', 'R'] : ['R', 'L'];
@@ -777,6 +855,219 @@
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) go(dx < 0 ? 1 : -1);
   }, { passive: true });
 
+
+  /* ------------------------------------------------------------------ *
+   *  Graffitis : SVG généré (contours, spray, coulures, étincelles)
+   * ------------------------------------------------------------------ */
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const F_IMPACT = "Impact, Haettenschweiler, 'Arial Black', 'Arial Narrow Bold', sans-serif";
+  const F_SCRIPT = "'Brush Script MT', 'Segoe Script', 'Snell Roundhand', 'Comic Sans MS', cursive";
+  const SKEW = 0.1405; // tan(8°)
+
+  const TAGS = {
+    made: {
+      vb: [640, 300],
+      lines: [
+        { t: 'Made By', x: 26, y: 80, size: 62, len: 240, font: F_SCRIPT, drips: false },
+        { t: 'UCHIWA', x: 14, y: 214, size: 172, len: 612, font: F_IMPACT, drips: true }
+      ],
+      swoosh: 'M24 244 C 190 228, 380 252, 620 232',
+      stars: [[600, 42, 1], [36, 150, 0.7], [610, 190, 0.55]]
+    },
+    year: {
+      vb: [540, 300],
+      lines: [{ t: '2026', x: 12, y: 212, size: 215, len: 510, font: F_IMPACT, drips: true }],
+      swoosh: 'M20 244 C 160 230, 330 252, 520 234',
+      stars: [[510, 34, 1], [22, 46, 0.7], [500, 200, 0.5]]
+    }
+  };
+
+  function svgEl(name, attrs, parent) {
+    const n = document.createElementNS(SVGNS, name);
+    Object.keys(attrs || {}).forEach(k => n.setAttribute(k, attrs[k]));
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  function buildTag(host, id, cfg) {
+    const svg = svgEl('svg', {
+      viewBox: `0 0 ${cfg.vb[0]} ${cfg.vb[1]}`, class: 'tag-svg', 'aria-hidden': 'true', focusable: 'false'
+    }, host);
+    const defs = svgEl('defs', {}, svg);
+
+    const grad = svgEl('linearGradient', { id: `gr-${id}`, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    svgEl('stop', { offset: '0%', style: 'stop-color:var(--c1)' }, grad);
+    svgEl('stop', { offset: '50%', style: 'stop-color:var(--c1)' }, grad);
+    svgEl('stop', { offset: '100%', style: 'stop-color:var(--c2)' }, grad);
+
+    const rough = svgEl('filter', { id: `rough-${id}`, x: '-6%', y: '-10%', width: '112%', height: '130%' }, defs);
+    svgEl('feTurbulence', { type: 'fractalNoise', baseFrequency: '0.035 0.05', numOctaves: 2, seed: id === 'made' ? 4 : 9, result: 'n1' }, rough);
+    svgEl('feDisplacementMap', { in: 'SourceGraphic', in2: 'n1', scale: 5, xChannelSelector: 'R', yChannelSelector: 'G', result: 'd1' }, rough);
+    svgEl('feTurbulence', { type: 'fractalNoise', baseFrequency: '0.9', numOctaves: 1, seed: 2, result: 'n2' }, rough);
+    svgEl('feDisplacementMap', { in: 'd1', in2: 'n2', scale: 2.4, xChannelSelector: 'G', yChannelSelector: 'R' }, rough);
+
+    const glow = svgEl('filter', { id: `glow-${id}`, x: '-20%', y: '-30%', width: '140%', height: '160%' }, defs);
+    svgEl('feGaussianBlur', { stdDeviation: 10 }, glow);
+    const soft = svgEl('filter', { id: `soft-${id}`, x: '-10%', y: '-20%', width: '120%', height: '150%' }, defs);
+    svgEl('feGaussianBlur', { stdDeviation: 5 }, soft);
+
+    const clipIds = [];
+    cfg.lines.forEach((ln, i) => {
+      const cp = svgEl('clipPath', { id: `clip-${id}-${i}` }, defs);
+      const ct = svgEl('text', textAttrs(ln), cp);
+      ct.textContent = ln.t;
+      clipIds.push(cp.id);
+    });
+
+    const lineWrap = (parent, ln) => svgEl('g', {
+      transform: `translate(${(ln.y * SKEW).toFixed(1)} 0) skewX(-8)`
+    }, parent);
+    const addText = (parent, ln, attrs) => {
+      const t = svgEl('text', Object.assign(textAttrs(ln), attrs), parent);
+      t.textContent = ln.t;
+      return t;
+    };
+
+    // Ombre portée + halo néon
+    const shadow = svgEl('g', { filter: `url(#soft-${id})`, opacity: 0.6, transform: 'translate(9 11)' }, svg);
+    const halo = svgEl('g', { class: 'halo', filter: `url(#glow-${id})` }, svg);
+    cfg.lines.forEach(ln => {
+      addText(lineWrap(shadow, ln), ln, { fill: '#000', stroke: '#000', 'stroke-width': 18, 'stroke-linejoin': 'round' });
+      addText(lineWrap(halo, ln), ln, { fill: 'none', stroke: 'var(--c1)', 'stroke-width': 28, 'stroke-linejoin': 'round' });
+    });
+
+    // Corps du graffiti (bords rugueux)
+    const main = svgEl('g', { class: 'fills', filter: `url(#rough-${id})` }, svg);
+    const drawG = svgEl('g', {}, svg);
+    const dripTargets = [];
+    cfg.lines.forEach((ln, i) => {
+      const g = lineWrap(main, ln);
+      addText(g, ln, { fill: '#05050a', stroke: '#05050a', 'stroke-width': 24, 'stroke-linejoin': 'round' });
+      addText(g, ln, { fill: '#fff', stroke: '#fff', 'stroke-width': 13, 'stroke-linejoin': 'round' });
+      const fill = addText(g, ln, { fill: `url(#gr-${id})`, stroke: 'none' });
+      // reflet brillant sur le tiers haut des lettres
+      const gloss = svgEl('g', { 'clip-path': `url(#${clipIds[i]})` }, g);
+      svgEl('rect', { x: ln.x - 10, y: ln.y - ln.size * 0.86, width: ln.len + 20, height: ln.size * 0.3, fill: '#fff', opacity: 0.28 }, gloss);
+      addText(g, ln, { fill: 'none', stroke: 'rgba(255,255,255,0.85)', 'stroke-width': 2.2, transform: 'translate(-3 -3)' });
+      dripTargets.push({ g, ln, fill });
+
+      // contour "tracé" au spray (animation d'écriture)
+      const dg = lineWrap(drawG, ln);
+      addText(dg, ln, { class: 'draw', fill: 'none', stroke: '#fff', 'stroke-width': 3, 'stroke-linejoin': 'round' });
+    });
+
+    // Traînée de peinture sous le texte
+    const swG = svgEl('g', {}, svg);
+    svgEl('path', { d: cfg.swoosh, class: 'swoosh', fill: 'none', stroke: '#05050a', 'stroke-width': 17, 'stroke-linecap': 'round' }, swG);
+    svgEl('path', { d: cfg.swoosh, class: 'swoosh', fill: 'none', stroke: 'var(--c1)', 'stroke-width': 8, 'stroke-linecap': 'round' }, swG);
+
+    // Étincelles qui scintillent
+    cfg.stars.forEach((st, i) => {
+      const sp = svgEl('path', {
+        class: 'spark',
+        d: 'M0-16 L3.5-3.5 16 0 3.5 3.5 0 16 -3.5 3.5 -16 0 -3.5 -3.5Z',
+        transform: `translate(${st[0]} ${st[1]}) scale(${st[2]})`,
+        fill: '#fff'
+      }, svg);
+      sp.style.setProperty('--td', `${rand(1.8, 3).toFixed(2)}s`);
+      sp.style.setProperty('--tl', `${(i * 0.7 + rand(0, 1)).toFixed(2)}s`);
+    });
+
+    return { svg, main, dripTargets, id };
+  }
+
+  function textAttrs(ln) {
+    return {
+      x: ln.x, y: ln.y, 'font-size': ln.size, 'font-family': ln.font,
+      'font-weight': 900, 'font-style': 'italic',
+      textLength: ln.len, lengthAdjust: 'spacingAndGlyphs'
+    };
+  }
+
+  // Gouttes de peinture et speckles d'overspray (nécessite le rendu du texte)
+  function decorateTag(built) {
+    built.dripTargets.forEach(({ g, ln, fill }) => {
+      let bb;
+      try { bb = fill.getBBox(); } catch (e) { return; }
+      // speckles d'overspray autour des lettres
+      const spec = svgEl('g', { class: 'spray' }, g);
+      for (let i = 0; i < 70; i++) {
+        const x = rand(bb.x - 14, bb.x + bb.width + 14);
+        const y = rand(bb.y + bb.height * 0.1, bb.y + bb.height * 0.95);
+        const c = svgEl('circle', { cx: x.toFixed(1), cy: y.toFixed(1), r: rand(0.7, 2.4).toFixed(1), fill: 'var(--c1)', opacity: rand(0.15, 0.7).toFixed(2) }, spec);
+        if (c.parentNode !== spec) spec.appendChild(c);
+      }
+      if (!ln.drips) return;
+      const dg = svgEl('g', { class: 'drips' }, g);
+      const n = ln.t.length;
+      const picks = [];
+      for (let i = 0; i < n; i++) if (Math.random() < 0.55) picks.push(i);
+      while (picks.length < 3) picks.push(randInt(0, n - 1));
+      picks.forEach(i => {
+        let ext;
+        try { ext = fill.getExtentOfChar(i); } catch (e) { return; }
+        const x = ext.x + ext.width * rand(0.2, 0.8);
+        const y0 = ln.y - 8;
+        const len = rand(26, 72);
+        const w = rand(6, 10);
+        const d = svgEl('g', { class: 'drip' }, dg);
+        d.style.setProperty('--dd', `${rand(7, 12).toFixed(1)}s`);
+        d.style.setProperty('--dl', `${rand(2.6, 6).toFixed(1)}s`);
+        svgEl('line', { x1: x, y1: y0, x2: x, y2: y0 + len, stroke: '#05050a', 'stroke-width': w + 7, 'stroke-linecap': 'round' }, d);
+        svgEl('line', { x1: x, y1: y0, x2: x, y2: y0 + len, stroke: 'var(--c2)', 'stroke-width': w, 'stroke-linecap': 'round' }, d);
+        svgEl('circle', { cx: x, cy: y0 + len, r: w * 0.78, fill: 'var(--c2)', stroke: '#05050a', 'stroke-width': 3 }, d);
+        svgEl('line', { x1: x - w * 0.18, y1: y0 + 2, x2: x - w * 0.18, y2: y0 + len * 0.8, stroke: 'rgba(255,255,255,0.55)', 'stroke-width': 1.6, 'stroke-linecap': 'round' }, d);
+      });
+    });
+  }
+
+  function initTags() {
+    document.querySelectorAll('.tag').forEach(host => {
+      const id = host.dataset.tag;
+      if (!TAGS[id]) return;
+      const built = buildTag(host, id, TAGS[id]);
+      requestAnimationFrame(() => decorateTag(built));
+      emitters.push({ el: host, r: null, acc: 0, burst: rand(1, 2.5), id });
+    });
+    refreshEmitters();
+  }
+
+  function refreshEmitters() {
+    emitters.forEach(e => { e.r = e.el.getBoundingClientRect(); });
+  }
+  setInterval(refreshEmitters, 300);
+
+  // Éclairs qui traversent les graffitis à intervalle régulier (alternance)
+  let zapIdx = 0;
+  let zapTimer = 0;
+
+  function zapTag() {
+    if (!emitters.length) return;
+    const e = emitters[zapIdx++ % emitters.length];
+    const r = e.el.getBoundingClientRect();
+    if (r.width < 10) return;
+    const cy = r.top + r.height * 0.5;
+    strike({
+      bolts: [
+        { sx: r.left - r.width * 0.15, sy: cy - rand(30, 70), ex: r.right + r.width * 0.15, ey: cy + rand(10, 60) },
+        { sx: r.left + r.width * rand(0.3, 0.7), sy: -30, ex: r.left + r.width * rand(0.3, 0.7), ey: r.bottom + r.height * 0.25, delay: 140 }
+      ]
+    });
+    restartClass(e.el, 'zap');
+    smoke.flash = 1;
+    smoke.boost = Math.max(smoke.boost, 0.6);
+    for (let i = 0; i < 10; i++) addPuff(r, true);
+    Sound.thunder(0.55);
+  }
+
+  function zapLoop(delay) {
+    clearTimeout(zapTimer);
+    zapTimer = setTimeout(() => {
+      if (!document.hidden) zapTag();
+      zapLoop(2800);
+    }, delay);
+  }
+
   /* ------------------------------------------------------------------ *
    *  Boucle principale (une seule requestAnimationFrame)
    * ------------------------------------------------------------------ */
@@ -796,6 +1087,7 @@
    * ------------------------------------------------------------------ */
   resize();
   applyColors();
+  initTags();
   while (smoke.parts.length < targetCount()) smoke.parts.push(newParticle(true)); // fumée déjà installée au chargement
 
   const first = preloaded[0];
@@ -808,6 +1100,9 @@
     await show(0, 0, true);
     loaderEl.classList.add('hide');
     setTimeout(() => fire({ force: true, power: 0.6 }), 800); // éclair d'intro
+    root.classList.add('tags-on');
+    tagsOn = true;
+    zapLoop(4200);
   });
 
   requestAnimationFrame(frame);
