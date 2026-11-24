@@ -6,6 +6,15 @@ services:
       - "80:80"
     restart: always
 
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:latest
+    container_name: nginx-exporter
+    command:
+      - "-nginx.scrape-uri=http://mon-app/stub_status"
+    depends_on:
+      - web-app
+    restart: always
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
